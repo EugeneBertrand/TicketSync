@@ -4,8 +4,14 @@
 ###
 
 # 1. Configure the AWS Provider
+variable "aws_region" {
+  description = "AWS region for resources"
+  type        = string
+  default     = "us-east-1"
+}
+
 provider "aws" {
-  region = "us-east-1" # You can change this
+  region = var.aws_region
 }
 
 #---------------------------------------
@@ -59,7 +65,155 @@ resource "aws_s3_bucket_website_configuration" "ticket_sync_website" {
 }
 
 #---------------------------------------
-# SECTION 2: IAM FOR DEVELOPER ACCESS
+# SECTION 2: AWS COGNITO FOR AUTHENTICATION
+#---------------------------------------
+
+# Cognito User Pool for Clients
+resource "aws_cognito_user_pool" "client_user_pool" {
+  name = "ticketsync-client-users"
+
+  # Password policy
+  password_policy {
+    minimum_length    = 8
+    require_lowercase = true
+    require_uppercase = true
+    require_numbers   = true
+    require_symbols   = true
+  }
+
+  # User attributes
+  schema {
+    name                = "email"
+    attribute_data_type = "String"
+    required            = true
+    mutable             = true
+  }
+
+  schema {
+    name                = "name"
+    attribute_data_type = "String"
+    required            = false
+    mutable             = true
+  }
+
+  # Email configuration
+  email_configuration {
+    email_sending_account = "COGNITO_DEFAULT"
+  }
+
+  # Auto-verify email
+  auto_verified_attributes = ["email"]
+
+  # MFA configuration (optional - can be enabled later)
+  mfa_configuration = "OFF"
+
+  # Account recovery
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
+    }
+  }
+}
+
+# Cognito User Pool Client for Clients
+resource "aws_cognito_user_pool_client" "client_user_pool_client" {
+  name         = "ticketsync-client-app-client"
+  user_pool_id = aws_cognito_user_pool.client_user_pool.id
+
+  # Explicit auth flows
+  explicit_auth_flows = [
+    "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH",
+    "ALLOW_USER_SRP_AUTH"
+  ]
+
+  # Token validity (in hours)
+  access_token_validity  = 24
+  id_token_validity      = 24
+  refresh_token_validity = 720
+
+  # Prevent user existence errors
+  prevent_user_existence_errors = "ENABLED"
+
+  # OAuth settings (if needed for future integrations)
+  supported_identity_providers = ["COGNITO"]
+}
+
+# Cognito User Pool for Admins
+resource "aws_cognito_user_pool" "admin_user_pool" {
+  name = "ticketsync-admin-users"
+
+  # Password policy (stricter for admins)
+  password_policy {
+    minimum_length    = 10
+    require_lowercase = true
+    require_uppercase = true
+    require_numbers   = true
+    require_symbols   = true
+  }
+
+  # User attributes
+  schema {
+    name                = "email"
+    attribute_data_type = "String"
+    required            = true
+    mutable             = true
+  }
+
+  schema {
+    name                = "name"
+    attribute_data_type = "String"
+    required            = false
+    mutable             = true
+  }
+
+  # Email configuration
+  email_configuration {
+    email_sending_account = "COGNITO_DEFAULT"
+  }
+
+  # Auto-verify email
+  auto_verified_attributes = ["email"]
+
+  # MFA configuration (recommended for admins)
+  mfa_configuration = "OPTIONAL"
+
+  # Account recovery
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
+    }
+  }
+}
+
+# Cognito User Pool Client for Admins
+resource "aws_cognito_user_pool_client" "admin_user_pool_client" {
+  name         = "ticketsync-admin-app-client"
+  user_pool_id = aws_cognito_user_pool.admin_user_pool.id
+
+  # Explicit auth flows
+  explicit_auth_flows = [
+    "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH",
+    "ALLOW_USER_SRP_AUTH"
+  ]
+
+  # Token validity (shorter for admins for security)
+  access_token_validity  = 8
+  id_token_validity      = 8
+  refresh_token_validity = 720
+
+  # Prevent user existence errors
+  prevent_user_existence_errors = "ENABLED"
+
+  # OAuth settings (if needed for future integrations)
+  supported_identity_providers = ["COGNITO"]
+}
+
+#---------------------------------------
+# SECTION 3: IAM FOR DEVELOPER ACCESS
 #---------------------------------------
 
 # This is the IAM Policy (the "rules")
@@ -116,4 +270,49 @@ resource "aws_iam_user" "teammate_user" {
 resource "aws_iam_user_group_membership" "add_teammate_to_group" {
   user   = aws_iam_user.teammate_user.name
   groups = [aws_iam_group.developer_group.name]
+}
+
+#---------------------------------------
+# SECTION 4: OUTPUTS
+#---------------------------------------
+
+# S3 Bucket outputs
+output "s3_bucket_name" {
+  description = "Name of the S3 bucket"
+  value       = aws_s3_bucket.ticket_sync_bucket.id
+}
+
+output "s3_bucket_website_endpoint" {
+  description = "Website endpoint for the S3 bucket"
+  value       = aws_s3_bucket_website_configuration.ticket_sync_website.website_endpoint
+}
+
+# Cognito outputs for Client
+output "client_user_pool_id" {
+  description = "Client User Pool ID"
+  value       = aws_cognito_user_pool.client_user_pool.id
+}
+
+output "client_user_pool_client_id" {
+  description = "Client User Pool Client ID"
+  value       = aws_cognito_user_pool_client.client_user_pool_client.id
+  sensitive   = false
+}
+
+# Cognito outputs for Admin
+output "admin_user_pool_id" {
+  description = "Admin User Pool ID"
+  value       = aws_cognito_user_pool.admin_user_pool.id
+}
+
+output "admin_user_pool_client_id" {
+  description = "Admin User Pool Client ID"
+  value       = aws_cognito_user_pool_client.admin_user_pool_client.id
+  sensitive   = false
+}
+
+# AWS Region
+output "aws_region" {
+  description = "AWS Region"
+  value       = var.aws_region
 }
