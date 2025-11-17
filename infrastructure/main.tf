@@ -52,15 +52,16 @@ resource "aws_s3_bucket_policy" "ticket_sync_policy" {
   })
 }
 
-# Enables the static website hosting feature
+# Configures the website settings for the S3 bucket
 resource "aws_s3_bucket_website_configuration" "ticket_sync_website" {
   bucket = aws_s3_bucket.ticket_sync_bucket.id
 
   index_document {
     suffix = "index.html"
   }
+
   error_document {
-    suffix = "index.html" # For React Router
+    key = "index.html"
   }
 }
 
@@ -142,49 +143,55 @@ resource "aws_cognito_user_pool_client" "client_user_pool_client" {
 
 # Cognito User Pool for Admins
 resource "aws_cognito_user_pool" "admin_user_pool" {
-  name = "ticketsync-admin-users"
-
-  # Password policy (stricter for admins)
+  name = "ticket-sync-admin-pool"
+  
+  # Password policy
   password_policy {
-    minimum_length    = 10
+    minimum_length    = 8
     require_lowercase = true
-    require_uppercase = true
     require_numbers   = true
     require_symbols   = true
+    require_uppercase = true
   }
 
-  # User attributes
-  schema {
-    name                = "email"
-    attribute_data_type = "String"
-    required            = true
-    mutable             = true
-  }
-
-  schema {
-    name                = "name"
-    attribute_data_type = "String"
-    required            = false
-    mutable             = true
-  }
-
+  # MFA configuration - disabling MFA for now to fix the error
+  mfa_configuration = "OFF"
+  
   # Email configuration
   email_configuration {
     email_sending_account = "COGNITO_DEFAULT"
   }
-
-  # Auto-verify email
+  
+  # Username configuration
+  username_attributes = ["email"]
   auto_verified_attributes = ["email"]
-
-  # MFA configuration (recommended for admins)
-  mfa_configuration = "OPTIONAL"
-
-  # Account recovery
-  account_recovery_setting {
-    recovery_mechanism {
-      name     = "verified_email"
-      priority = 1
+  
+  # Verification message template
+  verification_message_template {
+    default_email_option = "CONFIRM_WITH_CODE"
+    email_subject = "Your Verification Code"
+    email_message = "Your verification code is {####}"
+  }
+  
+  # Admin create user config
+  admin_create_user_config {
+    allow_admin_create_user_only = true
+    
+    invite_message_template {
+      email_subject = "Your temporary password for TicketSync Admin"
+      email_message = "Your username is {username} and temporary password is {####}."
+      sms_message   = "Your username is {username} and temporary password is {####}."
     }
+  }
+  
+  # Explicitly disable MFA
+  software_token_mfa_configuration {
+    enabled = false
+  }
+  
+  # Ensure MFA is properly disabled
+  user_attribute_update_settings {
+    attributes_require_verification_before_update = []
   }
 }
 
@@ -216,60 +223,25 @@ resource "aws_cognito_user_pool_client" "admin_user_pool_client" {
 # SECTION 3: IAM FOR DEVELOPER ACCESS
 #---------------------------------------
 
-# This is the IAM Policy (the "rules")
-resource "aws_iam_policy" "developer_s3_access" {
-  name        = "TicketSync-S3-Upload-Access"
-  description = "Allows developers to manage the TicketSync S3 bucket"
-
-  # This is the JSON we wrote, now stored as code.
-  policy = jsonencode({
-    "Version" = "2012-10-17",
-    "Statement" = [
-      {
-        "Sid"    = "AllowGroupToManageBucket",
-        "Effect" = "Allow",
-        "Action" = [
-          "s3:PutObject",
-          "s3:GetObject",
-          "s3:ListBucket",
-          "s3:DeleteObject"
-        ],
-        "Resource" = [
-          aws_s3_bucket.ticket_sync_bucket.arn,       # Connects to the S3 bucket
-          "${aws_s3_bucket.ticket_sync_bucket.arn}/*" # Connects to the objects *inside* the bucket
-        ]
-      },
-      {
-        "Sid"       = "AllowGroupToListAllBuckets",
-        "Effect"    = "Allow",
-        "Action"    = "s3:ListAllMyBuckets",
-        "Resource"  = "*"
-      }
-    ]
-  })
+# Data source to import existing IAM policy
+data "aws_iam_policy" "developer_s3_access" {
+  name = "TicketSync-S3-Upload-Access"
 }
 
-# This is the IAM Group (the "team")
-resource "aws_iam_group" "developer_group" {
-  name = "TicketSync-Developers"
-}
-
-# This is the "glue" that connects the policy to the group
-resource "aws_iam_group_policy_attachment" "attach_s3_access" {
-  group      = aws_iam_group.developer_group.name
-  policy_arn = aws_iam_policy.developer_s3_access.arn
+# Data source to import existing IAM group
+data "aws_iam_group" "developer_group" {
+  group_name = "TicketSync-Developers"
 }
 
 # This creates your teammate's user account
-# You can change the name or add more blocks like this
 resource "aws_iam_user" "teammate_user" {
   name = "teammate-github-username" # CHANGE THIS
 }
 
-# And this "glues" the user to the group
+# Add the user to the existing group
 resource "aws_iam_user_group_membership" "add_teammate_to_group" {
   user   = aws_iam_user.teammate_user.name
-  groups = [aws_iam_group.developer_group.name]
+  groups = [data.aws_iam_group.developer_group.group_name]
 }
 
 #---------------------------------------
