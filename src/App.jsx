@@ -29,8 +29,9 @@ function App() {
               </ProtectedRoute>
             }
           />
-          {/* Temporary route for development to view customer portal without auth */}
+          {/* Temporary routes for development to view dashboards without auth */}
           <Route path="/preview/client" element={<ClientDashboard />} />
+          <Route path="/preview/admin" element={<AdminDashboard />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
