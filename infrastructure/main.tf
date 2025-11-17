@@ -109,11 +109,94 @@ resource "aws_iam_group_policy_attachment" "attach_s3_access" {
 # This creates your teammate's user account
 # You can change the name or add more blocks like this
 resource "aws_iam_user" "teammate_user" {
-  name = "teammate-github-username" # CHANGE THIS
+  name = "Yuv28" 
 }
 
 # And this "glues" the user to the group
 resource "aws_iam_user_group_membership" "add_teammate_to_group" {
   user   = aws_iam_user.teammate_user.name
   groups = [aws_iam_group.developer_group.name]
+}
+# this code creates the DynamoDB table called "tickets" and sets up its key "ticket_id"
+resource "aws_dynamodb_table" "tickets" {
+  name           = "tickets"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "ticket_id"
+# these add "columns" to the table, both of type string, for the ticket_id and sentiment (need to add more for date and status)
+  attribute {
+    name = "ticket_id"
+    type = "S"
+  }
+  attribute {
+    name = "sentiment"
+    type = "S"
+  }
+}
+# sets up the IAM role for the lamdba functions called "lambda_role"
+resource "aws_iam_role" "lambda_role" {
+  name = "lambda_execution_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+# IAM policy that gives "lambda_role" basic lambda executions
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+# IAM policy that gives "lambda_role" full access to DynamoDB
+resource "aws_iam_role_policy_attachment" "lambda_dynamodb_access" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
+}
+# sets up the lambda function called "ticket_processer"
+resource "aws_lambda_function" "ticket_processor" {
+  function_name = "ticketProcessor"
+  handler       = "index.handler"
+  runtime       = "nodejs18.x"
+  role          = aws_iam_role.lambda_role.arn
+
+  filename = "lambda_function.zip"  # Your packaged Lambda code
+}
+# sets up the REST API "ticket_api"
+resource "aws_api_gateway_rest_api" "ticket_api" {
+  name = "ticketAPI"
+}
+# sets up a path called "tickets" that will connect incoming dat to API Gateway
+resource "aws_api_gateway_resource" "tickets" {
+  rest_api_id = aws_api_gateway_rest_api.ticket_api.id
+  parent_id   = aws_api_gateway_rest_api.ticket_api.root_resource_id
+  path_part   = "tickets"
+}
+# allows for POST requests to be made on the tickets path which will send ticket data directly to the API Gateway and to the lambda function
+resource "aws_api_gateway_method" "post_tickets" {
+  rest_api_id   = aws_api_gateway_rest_api.ticket_api.id
+  resource_id   = aws_api_gateway_resource.tickets.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+# connects the POST method to the ticket_processor lambda function
+resource "aws_api_gateway_integration" "lambda_integration" {
+  rest_api_id = aws_api_gateway_rest_api.ticket_api.id
+  resource_id = aws_api_gateway_resource.tickets.id
+  http_method = aws_api_gateway_method.post_tickets.http_method
+  type        = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri         = aws_lambda_function.ticket_processor.invoke_arn
+}
+# sets up permissions for lambda to get data through API Gateway
+resource "aws_lambda_permission" "apigw_invoke" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.ticket_processor.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.ticket_api.execution_arn}/*/*"
 }
