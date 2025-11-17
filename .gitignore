@@ -2,6 +2,9 @@
 node_modules/
 /.pnp
 .pnp.js
+/.env
+env
+/env
 
 # Testing
 /coverage
@@ -36,4 +39,8 @@ lerna-debug.log*
 *.tfstate
 *.tfstate.*
 .terraform.lock.hcl
+
+# Lambda
+lambda/*.zip
+
 
