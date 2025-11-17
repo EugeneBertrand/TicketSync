@@ -228,20 +228,114 @@ data "aws_iam_policy" "developer_s3_access" {
   name = "TicketSync-S3-Upload-Access"
 }
 
+# Get current AWS account ID
+data "aws_caller_identity" "current" {}
+
 # Data source to import existing IAM group
 data "aws_iam_group" "developer_group" {
   group_name = "TicketSync-Developers"
 }
 
-# This creates your teammate's user account
-resource "aws_iam_user" "teammate_user" {
-  name = "teammate-github-username" # CHANGE THIS
+# IAM Policy for Cognito User Pool access
+resource "aws_iam_policy" "cognito_access" {
+  name        = "TicketSync-Cognito-Access"
+  description = "IAM policy for managing Cognito User Pools"
+  
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:AdminCreateUser",
+          "cognito-idp:AdminInitiateAuth",
+          "cognito-idp:ListUsers",
+          "cognito-idp:AdminGetUser",
+          "cognito-idp:AdminUpdateUserAttributes",
+          "cognito-idp:AdminRespondToAuthChallenge",
+          "cognito-idp:AdminSetUserPassword"
+        ]
+        Resource = [
+          "arn:aws:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/${aws_cognito_user_pool.client_user_pool.id}",
+          "arn:aws:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/${aws_cognito_user_pool.admin_user_pool.id}"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:ListUserPools",
+          "cognito-idp:DescribeUserPoolClient"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 }
 
-# Add the user to the existing group
-resource "aws_iam_user_group_membership" "add_teammate_to_group" {
-  user   = aws_iam_user.teammate_user.name
+# Attach Cognito policy to developer group
+resource "aws_iam_group_policy_attachment" "cognito_access" {
+  group      = data.aws_iam_group.developer_group.group_name
+  policy_arn = aws_iam_policy.cognito_access.arn
+}
+
+# Create IAM users for team members with console access
+resource "aws_iam_user" "team_members" {
+  for_each = {
+    "Dhruv" = "Dhruv111"
+    "Yuv" = "Yuvmagan22"
+    "Clarissa" = "Clarissa22"
+  }
+  
+  name = each.key
+  
+  # Enable console access
+  force_destroy = true  # Allows user deletion via Terraform
+  
+  tags = {
+    ManagedBy = "Terraform"
+    Purpose  = "TicketSync Console Access"
+  }
+}
+
+# Set console login profiles for each team member with their specific passwords
+resource "aws_iam_user_login_profile" "team_logins" {
+  for_each = aws_iam_user.team_members
+  
+  user    = each.value.name
+  
+  # Set the specific password for each user
+  password = {
+    "Dhruv" = "Dhruv111"
+    "Yuv" = "Yuvmagan22"
+    "Clarissa" = "Clarissa22"
+  }[each.key]
+  
+  # Require password reset on first login
+  password_reset_required = false  # Set to true if you want to force password change on first login
+  
+  lifecycle {
+    # Prevent Terraform from trying to manage the password after creation
+    ignore_changes = [password]
+  }
+}
+
+# Add team members to the developer group
+resource "aws_iam_user_group_membership" "add_team_to_group" {
+  for_each = aws_iam_user.team_members
+  
+  user   = each.value.name
   groups = [data.aws_iam_group.developer_group.group_name]
+}
+
+# Output the initial passwords (for reference, in a real scenario use a secure method)
+output "team_member_initial_passwords" {
+  value = {
+    for user, profile in aws_iam_user_login_profile.team_logins :
+    user => profile.encrypted_password
+  }
+  
+  description = "Initial passwords for team members (encrypted)"
+  sensitive   = true
 }
 
 #---------------------------------------
