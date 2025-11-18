@@ -4,8 +4,14 @@
 ###
 
 # 1. Configure the AWS Provider
+variable "aws_region" {
+  description = "AWS region for resources"
+  type        = string
+  default     = "us-east-1"
+}
+
 provider "aws" {
-  region = "us-east-1" # You can change this
+  region = var.aws_region
 }
 
 #---------------------------------------
@@ -46,157 +52,333 @@ resource "aws_s3_bucket_policy" "ticket_sync_policy" {
   })
 }
 
-# Enables the static website hosting feature
+# Configures the website settings for the S3 bucket
 resource "aws_s3_bucket_website_configuration" "ticket_sync_website" {
   bucket = aws_s3_bucket.ticket_sync_bucket.id
 
   index_document {
     suffix = "index.html"
   }
+
   error_document {
-    suffix = "index.html" # For React Router
+    key = "index.html"
   }
 }
 
 #---------------------------------------
-# SECTION 2: IAM FOR DEVELOPER ACCESS
+# SECTION 2: AWS COGNITO FOR AUTHENTICATION
 #---------------------------------------
 
-# This is the IAM Policy (the "rules")
-resource "aws_iam_policy" "developer_s3_access" {
-  name        = "TicketSync-S3-Upload-Access"
-  description = "Allows developers to manage the TicketSync S3 bucket"
+# Cognito User Pool for Clients
+resource "aws_cognito_user_pool" "client_user_pool" {
+  name = "ticketsync-client-users"
 
-  # This is the JSON we wrote, now stored as code.
+  # Password policy
+  password_policy {
+    minimum_length    = 8
+    require_lowercase = true
+    require_uppercase = true
+    require_numbers   = true
+    require_symbols   = true
+  }
+
+  # User attributes
+  schema {
+    name                = "email"
+    attribute_data_type = "String"
+    required            = true
+    mutable             = true
+  }
+
+  schema {
+    name                = "name"
+    attribute_data_type = "String"
+    required            = false
+    mutable             = true
+  }
+
+  # Email configuration
+  email_configuration {
+    email_sending_account = "COGNITO_DEFAULT"
+  }
+
+  # Auto-verify email
+  auto_verified_attributes = ["email"]
+
+  # MFA configuration (optional - can be enabled later)
+  mfa_configuration = "OFF"
+
+  # Account recovery
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
+    }
+  }
+}
+
+# Cognito User Pool Client for Clients
+resource "aws_cognito_user_pool_client" "client_user_pool_client" {
+  name         = "ticketsync-client-app-client"
+  user_pool_id = aws_cognito_user_pool.client_user_pool.id
+
+  # Explicit auth flows
+  explicit_auth_flows = [
+    "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH",
+    "ALLOW_USER_SRP_AUTH"
+  ]
+
+  # Token validity (in hours)
+  access_token_validity  = 24
+  id_token_validity      = 24
+  refresh_token_validity = 720
+
+  # Prevent user existence errors
+  prevent_user_existence_errors = "ENABLED"
+
+  # OAuth settings (if needed for future integrations)
+  supported_identity_providers = ["COGNITO"]
+}
+
+# Cognito User Pool for Admins
+resource "aws_cognito_user_pool" "admin_user_pool" {
+  name = "ticket-sync-admin-pool"
+  
+  # Password policy
+  password_policy {
+    minimum_length    = 8
+    require_lowercase = true
+    require_numbers   = true
+    require_symbols   = true
+    require_uppercase = true
+  }
+
+  # MFA configuration - disabling MFA for now to fix the error
+  mfa_configuration = "OFF"
+  
+  # Email configuration
+  email_configuration {
+    email_sending_account = "COGNITO_DEFAULT"
+  }
+  
+  # Username configuration
+  username_attributes = ["email"]
+  auto_verified_attributes = ["email"]
+  
+  # Verification message template
+  verification_message_template {
+    default_email_option = "CONFIRM_WITH_CODE"
+    email_subject = "Your Verification Code"
+    email_message = "Your verification code is {####}"
+  }
+  
+  # Admin create user config
+  admin_create_user_config {
+    allow_admin_create_user_only = true
+    
+    invite_message_template {
+      email_subject = "Your temporary password for TicketSync Admin"
+      email_message = "Your username is {username} and temporary password is {####}."
+      sms_message   = "Your username is {username} and temporary password is {####}."
+    }
+  }
+  
+  # Explicitly disable MFA
+  software_token_mfa_configuration {
+    enabled = false
+  }
+  
+  # Ensure MFA is properly disabled
+  user_attribute_update_settings {
+    attributes_require_verification_before_update = []
+  }
+}
+
+# Cognito User Pool Client for Admins
+resource "aws_cognito_user_pool_client" "admin_user_pool_client" {
+  name         = "ticketsync-admin-app-client"
+  user_pool_id = aws_cognito_user_pool.admin_user_pool.id
+
+  # Explicit auth flows
+  explicit_auth_flows = [
+    "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH",
+    "ALLOW_USER_SRP_AUTH"
+  ]
+
+  # Token validity (shorter for admins for security)
+  access_token_validity  = 8
+  id_token_validity      = 8
+  refresh_token_validity = 720
+
+  # Prevent user existence errors
+  prevent_user_existence_errors = "ENABLED"
+
+  # OAuth settings (if needed for future integrations)
+  supported_identity_providers = ["COGNITO"]
+}
+
+#---------------------------------------
+# SECTION 3: IAM FOR DEVELOPER ACCESS
+#---------------------------------------
+
+# Data source to import existing IAM policy
+data "aws_iam_policy" "developer_s3_access" {
+  name = "TicketSync-S3-Upload-Access"
+}
+
+# Get current AWS account ID
+data "aws_caller_identity" "current" {}
+
+# Data source to import existing IAM group
+data "aws_iam_group" "developer_group" {
+  group_name = "TicketSync-Developers"
+}
+
+# IAM Policy for Cognito User Pool access
+resource "aws_iam_policy" "cognito_access" {
+  name        = "TicketSync-Cognito-Access"
+  description = "IAM policy for managing Cognito User Pools"
+  
   policy = jsonencode({
-    "Version" = "2012-10-17",
-    "Statement" = [
+    Version = "2012-10-17"
+    Statement = [
       {
-        "Sid"    = "AllowGroupToManageBucket",
-        "Effect" = "Allow",
-        "Action" = [
-          "s3:PutObject",
-          "s3:GetObject",
-          "s3:ListBucket",
-          "s3:DeleteObject"
-        ],
-        "Resource" = [
-          aws_s3_bucket.ticket_sync_bucket.arn,       # Connects to the S3 bucket
-          "${aws_s3_bucket.ticket_sync_bucket.arn}/*" # Connects to the objects *inside* the bucket
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:AdminCreateUser",
+          "cognito-idp:AdminInitiateAuth",
+          "cognito-idp:ListUsers",
+          "cognito-idp:AdminGetUser",
+          "cognito-idp:AdminUpdateUserAttributes",
+          "cognito-idp:AdminRespondToAuthChallenge",
+          "cognito-idp:AdminSetUserPassword"
+        ]
+        Resource = [
+          "arn:aws:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/${aws_cognito_user_pool.client_user_pool.id}",
+          "arn:aws:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/${aws_cognito_user_pool.admin_user_pool.id}"
         ]
       },
       {
-        "Sid"       = "AllowGroupToListAllBuckets",
-        "Effect"    = "Allow",
-        "Action"    = "s3:ListAllMyBuckets",
-        "Resource"  = "*"
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:ListUserPools",
+          "cognito-idp:DescribeUserPoolClient"
+        ]
+        Resource = "*"
       }
     ]
   })
 }
 
-# This is the IAM Group (the "team")
-resource "aws_iam_group" "developer_group" {
-  name = "TicketSync-Developers"
+# Attach Cognito policy to developer group
+resource "aws_iam_group_policy_attachment" "cognito_access" {
+  group      = data.aws_iam_group.developer_group.group_name
+  policy_arn = aws_iam_policy.cognito_access.arn
 }
 
-# This is the "glue" that connects the policy to the group
-resource "aws_iam_group_policy_attachment" "attach_s3_access" {
-  group      = aws_iam_group.developer_group.name
-  policy_arn = aws_iam_policy.developer_s3_access.arn
-}
-
-# This creates your teammate's user account
-# You can change the name or add more blocks like this
-resource "aws_iam_user" "teammate_user" {
-  name = "Yuv28" 
-}
-
-# And this "glues" the user to the group
-resource "aws_iam_user_group_membership" "add_teammate_to_group" {
-  user   = aws_iam_user.teammate_user.name
-  groups = [aws_iam_group.developer_group.name]
-}
-# this code creates the DynamoDB table called "tickets" and sets up its key "ticket_id"
-resource "aws_dynamodb_table" "tickets" {
-  name           = "tickets"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "ticket_id"
-# these add "columns" to the table, both of type string, for the ticket_id and sentiment (need to add more for date and status)
-  attribute {
-    name = "ticket_id"
-    type = "S"
+# Create IAM users for team members with console access
+resource "aws_iam_user" "team_members" {
+  for_each = {
+    "Dhruv" = "Dhruv111"
+    "Yuv" = "Yuvmagan22"
+    "Clarissa" = "Clarissa22"
   }
-  attribute {
-    name = "sentiment"
-    type = "S"
+  
+  name = each.key
+  
+  # Enable console access
+  force_destroy = true  # Allows user deletion via Terraform
+  
+  tags = {
+    ManagedBy = "Terraform"
+    Purpose  = "TicketSync Console Access"
   }
 }
-# sets up the IAM role for the lamdba functions called "lambda_role"
-resource "aws_iam_role" "lambda_role" {
-  name = "lambda_execution_role"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action    = "sts:AssumeRole"
-      Effect    = "Allow"
-      Principal = {
-        Service = "lambda.amazonaws.com"
-      }
-    }]
-  })
+# Set console login profiles for each team member with their specific passwords
+resource "aws_iam_user_login_profile" "team_logins" {
+  for_each = aws_iam_user.team_members
+  
+  user    = each.value.name
+  
+  # Set the specific password for each user
+  password = {
+    "Dhruv" = "Dhruv111"
+    "Yuv" = "Yuvmagan22"
+    "Clarissa" = "Clarissa22"
+  }[each.key]
+  
+  # Require password reset on first login
+  password_reset_required = false  # Set to true if you want to force password change on first login
+  
+  lifecycle {
+    # Prevent Terraform from trying to manage the password after creation
+    ignore_changes = [password]
+  }
 }
-# IAM policy that gives "lambda_role" basic lambda executions
-resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
-  role       = aws_iam_role.lambda_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-# IAM policy that gives "lambda_role" full access to DynamoDB
-resource "aws_iam_role_policy_attachment" "lambda_dynamodb_access" {
-  role       = aws_iam_role.lambda_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
-}
-# sets up the lambda function called "ticket_processer"
-resource "aws_lambda_function" "ticket_processor" {
-  function_name = "ticketProcessor"
-  handler       = "index.handler"
-  runtime       = "nodejs18.x"
-  role          = aws_iam_role.lambda_role.arn
 
-  filename = "lambda_function.zip"  # Your packaged Lambda code
+# Add team members to the developer group
+resource "aws_iam_user_group_membership" "add_team_to_group" {
+  for_each = aws_iam_user.team_members
+  
+  user   = each.value.name
+  groups = [data.aws_iam_group.developer_group.group_name]
 }
-# sets up the REST API "ticket_api"
-resource "aws_api_gateway_rest_api" "ticket_api" {
-  name = "ticketAPI"
+
+# Output the initial passwords (for reference, in a real scenario use a secure method)
+output "team_member_initial_passwords" {
+  value = {
+    for user, profile in aws_iam_user_login_profile.team_logins :
+    user => profile.encrypted_password
+  }
+  
+  description = "Initial passwords for team members (encrypted)"
+  sensitive   = true
 }
-# sets up a path called "tickets" that will connect incoming dat to API Gateway
-resource "aws_api_gateway_resource" "tickets" {
-  rest_api_id = aws_api_gateway_rest_api.ticket_api.id
-  parent_id   = aws_api_gateway_rest_api.ticket_api.root_resource_id
-  path_part   = "tickets"
+
+#---------------------------------------
+# SECTION 4: OUTPUTS
+#---------------------------------------
+
+# S3 Bucket outputs
+output "s3_bucket_name" {
+  description = "Name of the S3 bucket"
+  value       = aws_s3_bucket.ticket_sync_bucket.id
 }
-# allows for POST requests to be made on the tickets path which will send ticket data directly to the API Gateway and to the lambda function
-resource "aws_api_gateway_method" "post_tickets" {
-  rest_api_id   = aws_api_gateway_rest_api.ticket_api.id
-  resource_id   = aws_api_gateway_resource.tickets.id
-  http_method   = "POST"
-  authorization = "NONE"
+
+output "s3_bucket_website_endpoint" {
+  description = "Website endpoint for the S3 bucket"
+  value       = aws_s3_bucket_website_configuration.ticket_sync_website.website_endpoint
 }
-# connects the POST method to the ticket_processor lambda function
-resource "aws_api_gateway_integration" "lambda_integration" {
-  rest_api_id = aws_api_gateway_rest_api.ticket_api.id
-  resource_id = aws_api_gateway_resource.tickets.id
-  http_method = aws_api_gateway_method.post_tickets.http_method
-  type        = "AWS_PROXY"
-  integration_http_method = "POST"
-  uri         = aws_lambda_function.ticket_processor.invoke_arn
+
+# Cognito outputs for Client
+output "client_user_pool_id" {
+  description = "Client User Pool ID"
+  value       = aws_cognito_user_pool.client_user_pool.id
 }
-# sets up permissions for lambda to get data through API Gateway
-resource "aws_lambda_permission" "apigw_invoke" {
-  statement_id  = "AllowAPIGatewayInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.ticket_processor.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.ticket_api.execution_arn}/*/*"
+
+output "client_user_pool_client_id" {
+  description = "Client User Pool Client ID"
+  value       = aws_cognito_user_pool_client.client_user_pool_client.id
+  sensitive   = false
+}
+
+# Cognito outputs for Admin
+output "admin_user_pool_id" {
+  description = "Admin User Pool ID"
+  value       = aws_cognito_user_pool.admin_user_pool.id
+}
+
+output "admin_user_pool_client_id" {
+  description = "Admin User Pool Client ID"
+  value       = aws_cognito_user_pool_client.admin_user_pool_client.id
+  sensitive   = false
+}
+
+# AWS Region
+output "aws_region" {
+  description = "AWS Region"
+  value       = var.aws_region
 }

@@ -37,8 +37,8 @@ def lambda_handler(event, context):
         'status': 'OPEN',
         'timestamp': datetime.utcnow().isoformat()
     })
-    def update_ticket_status(event, context):
-        # loads in the ticket ID and new status from the event body
+def update_ticket_status(event, context):
+     # loads in the ticket ID and new status from the event body
         body = json.loads(event.get('body', '{}'))
         ticket_id = body.get('ticket_id')
         status = body.get('status')
