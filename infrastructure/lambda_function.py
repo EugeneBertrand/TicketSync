@@ -36,23 +36,34 @@ def lambda_handler(event, context):
         'priority': priority,
         'status': 'OPEN',
         'timestamp': datetime.utcnow().isoformat()
+    
     })
+    # Return the ticket ID and sentiment analysis result
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "message": "Ticket created",
+            "ticket_id": ticket_id,
+            "sentiment": sentiment,
+            "priority": priority
+        })
+    }
 def update_ticket_status(event, context):
-     # loads in the ticket ID and new status from the event body
-        body = json.loads(event.get('body', '{}'))
-        ticket_id = body.get('ticket_id')
-        status = body.get('status')
+    # loads in the ticket ID and new status from the event body
+    body = json.loads(event.get('body', '{}'))
+    ticket_id = body.get('ticket_id')
+    status = body.get('status')
 
-        table.update_item(
-            # finds the ticket by its ID and updates the status
-            Key={'ticket_id': ticket_id},
-            UpdateExpression="set #s = :status",
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={':status': status},
+    table.update_item(
+    # finds the ticket by its ID and updates the status
+        Key={'ticket_id': ticket_id},
+        UpdateExpression="set #s = :status",
+        ExpressionAttributeNames={'#s': 'status'},
+        ExpressionAttributeValues={':status': status},
         )
 
-        return {
-            # returns a success message
-            "statusCode": 200,
-            "body": json.dumps({"message": "Ticket updated"})
+    return {
+        # returns a success message
+        "statusCode": 200,
+        "body": json.dumps({"message": "Ticket updated"})
         }
