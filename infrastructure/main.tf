@@ -115,6 +115,10 @@ resource "aws_cognito_user_pool" "client_user_pool" {
       priority = 1
     }
   }
+
+  lifecycle {
+    ignore_changes = [schema]
+  }
 }
 
 # Cognito User Pool Client for Clients
@@ -156,42 +160,32 @@ resource "aws_cognito_user_pool" "admin_user_pool" {
 
   # MFA configuration - disabling MFA for now to fix the error
   mfa_configuration = "OFF"
-  
+
   # Email configuration
   email_configuration {
     email_sending_account = "COGNITO_DEFAULT"
   }
-  
+
   # Username configuration
   username_attributes = ["email"]
   auto_verified_attributes = ["email"]
-  
+
   # Verification message template
   verification_message_template {
     default_email_option = "CONFIRM_WITH_CODE"
     email_subject = "Your Verification Code"
     email_message = "Your verification code is {####}"
   }
-  
+
   # Admin create user config
   admin_create_user_config {
     allow_admin_create_user_only = true
-    
+
     invite_message_template {
       email_subject = "Your temporary password for TicketSync Admin"
       email_message = "Your username is {username} and temporary password is {####}."
       sms_message   = "Your username is {username} and temporary password is {####}."
     }
-  }
-  
-  # Explicitly disable MFA
-  software_token_mfa_configuration {
-    enabled = false
-  }
-  
-  # Ensure MFA is properly disabled
-  user_attribute_update_settings {
-    attributes_require_verification_before_update = []
   }
 }
 
@@ -297,45 +291,12 @@ resource "aws_iam_user" "team_members" {
   }
 }
 
-# Set console login profiles for each team member with their specific passwords
-resource "aws_iam_user_login_profile" "team_logins" {
-  for_each = aws_iam_user.team_members
-  
-  user    = each.value.name
-  
-  # Set the specific password for each user
-  password = {
-    "Dhruv" = "Dhruv111"
-    "Yuv" = "Yuvmagan22"
-    "Clarissa" = "Clarissa22"
-  }[each.key]
-  
-  # Require password reset on first login
-  password_reset_required = false  # Set to true if you want to force password change on first login
-  
-  lifecycle {
-    # Prevent Terraform from trying to manage the password after creation
-    ignore_changes = [password]
-  }
-}
-
 # Add team members to the developer group
 resource "aws_iam_user_group_membership" "add_team_to_group" {
   for_each = aws_iam_user.team_members
   
   user   = each.value.name
   groups = [data.aws_iam_group.developer_group.group_name]
-}
-
-# Output the initial passwords (for reference, in a real scenario use a secure method)
-output "team_member_initial_passwords" {
-  value = {
-    for user, profile in aws_iam_user_login_profile.team_logins :
-    user => profile.encrypted_password
-  }
-  
-  description = "Initial passwords for team members (encrypted)"
-  sensitive   = true
 }
 
 #---------------------------------------
