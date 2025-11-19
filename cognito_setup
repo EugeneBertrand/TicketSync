@@ -1,0 +1,176 @@
+frontend/
+├── src/
+│   ├── aws-exports.js
+│   ├── auth.js
+│   ├── components/
+│   │   ├── Login.jsx
+│   │   ├── Register.jsx
+│   │   └── Dashboard.jsx
+│   ├── App.jsx
+│   └── index.js
+├── package.json
+└── README.md
+
+// aws-exports.js
+const awsConfig = {
+  region: "us-east-1",
+  userPoolId: "us-east-1_XXXXXXXXX",
+  userPoolWebClientId: "XXXXXXXXXXXXXX",
+};
+export default awsConfig;
+
+// auth.js
+import { CognitoUserPool, CognitoUser, AuthenticationDetails } from "amazon-cognito-identity-js";
+import awsConfig from "./aws-exports";
+const poolData = { UserPoolId: awsConfig.userPoolId, ClientId: awsConfig.userPoolWebClientId };
+const userPool = new CognitoUserPool(poolData);
+export function registerUser(email, password) {
+  return new Promise((resolve, reject) => {
+    userPool.signUp(email, password, [], null, (err, result) => {
+      if (err) return reject(err);
+      resolve(result.user);
+    });
+  });
+}
+export function loginUser(email, password) {
+  const user = new CognitoUser({ Username: email, Pool: userPool });
+  const authDetails = new AuthenticationDetails({ Username: email, Password: password });
+  return new Promise((resolve, reject) => {
+    user.authenticateUser(authDetails, {
+      onSuccess: (result) => {
+        const token = result.getIdToken().getJwtToken();
+        localStorage.setItem("token", token);
+        resolve({ message: "Login successful!", token });
+      },
+      onFailure: (err) => reject(err),
+    });
+  });
+}
+export function getCurrentUser() { return userPool.getCurrentUser(); }
+export function logoutUser() {
+  const user = userPool.getCurrentUser();
+  if (user) user.signOut();
+  localStorage.removeItem("token");
+}
+
+// components/Login.jsx
+import React, { useState } from "react";
+import { loginUser } from "../auth";
+export default function Login() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const result = await loginUser(email, password);
+      alert(result.message);
+      window.location.href = "/dashboard";
+    } catch (err) {
+      alert(err.message || JSON.stringify(err));
+    }
+  };
+  return (
+    <div className="login-container">
+      <h2>Login to TicketSync</h2>
+      <form onSubmit={handleSubmit}>
+        <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <button type="submit">Login</button>
+      </form>
+      <p>Don’t have an account? <a href="/register">Register here</a></p>
+    </div>
+  );
+}
+
+// components/Register.jsx
+import React, { useState } from "react";
+import { registerUser } from "../auth";
+export default function Register() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const user = await registerUser(email, password);
+      alert(`User ${user.getUsername()} registered successfully!`);
+    } catch (err) {
+      alert(err.message || JSON.stringify(err));
+    }
+  };
+  return (
+    <div className="register-container">
+      <h2>Register for TicketSync</h2>
+      <form onSubmit={handleSubmit}>
+        <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <button type="submit">Register</button>
+      </form>
+    </div>
+  );
+}
+
+// components/Dashboard.jsx
+import React from "react";
+import { logoutUser, getCurrentUser } from "../auth";
+export default function Dashboard() {
+  const user = getCurrentUser();
+  return (
+    <div className="dashboard">
+      <h2>Welcome to TicketSync Dashboard</h2>
+      <p>Logged in as: {user ? user.getUsername() : "Guest"}</p>
+      <button onClick={logoutUser}>Logout</button>
+    </div>
+  );
+}
+
+// App.jsx
+import React from "react";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import Login from "./components/Login";
+import Register from "./components/Register";
+import Dashboard from "./components/Dashboard";
+export default function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+      </Routes>
+    </Router>
+  );
+}
+
+// package.json
+{
+  "name": "ticketsync-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "amazon-cognito-identity-js": "^6.3.7",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-router-dom": "^6.23.0"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build"
+  }
+}
+
+// README.md
+# TicketSync Frontend (Cognito Integration)
+
+React-based frontend with AWS Cognito authentication.
+
+## Features
+- User registration and login via AWS Cognito
+- JWT token storage and session management
+- Secure dashboard with logout functionality
+
+## Setup
+1. Replace values in `src/aws-exports.js` with your Cognito credentials.
+2. Run:
+```bash
+npm install
+npm start
