@@ -1,6 +1,12 @@
-# Lambda Function for Email Handling
+###############################################
+# Terraform: Lambda + API Gateway + IAM Setup
+# Project: TicketSync
+###############################################
+# -----------------------------
+# 2️⃣ IAM Roles & Policies
+# -----------------------------
 
-# IAM Role for Lambda
+# ----- Email Lambda Role -----
 resource "aws_iam_role" "lambda_email_role" {
   name = "ticketsync-email-lambda-role"
 
@@ -10,26 +16,21 @@ resource "aws_iam_role" "lambda_email_role" {
       {
         Action = "sts:AssumeRole"
         Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
+        Principal = { Service = "lambda.amazonaws.com" }
       }
     ]
   })
 
-  tags = {
-    Name        = "TicketSync Email Lambda Role"
-    Environment = var.environment
-  }
+  tags = { Name = "TicketSync Email Lambda Role", Environment = var.environment }
 }
 
-# IAM Policy for Lambda - CloudWatch Logs
-resource "aws_iam_role_policy_attachment" "lambda_logs" {
+# Attach basic execution role (CloudWatch logs)
+resource "aws_iam_role_policy_attachment" "lambda_logs_email" {
   role       = aws_iam_role.lambda_email_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# IAM Policy for Lambda - SES Access
+# SES policy for sending emails
 resource "aws_iam_policy" "lambda_ses_policy" {
   name        = "ticketsync-lambda-ses-policy"
   description = "Allow Lambda to send emails via SES"
@@ -38,39 +39,30 @@ resource "aws_iam_policy" "lambda_ses_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = [
-          "ses:SendEmail",
-          "ses:SendRawEmail"
-        ]
+        Effect   = "Allow"
+        Action   = ["ses:SendEmail","ses:SendRawEmail"]
         Resource = "*"
       }
     ]
   })
 }
 
-resource "aws_iam_role_policy_attachment" "lambda_ses" {
+resource "aws_iam_role_policy_attachment" "lambda_ses_attach" {
   role       = aws_iam_role.lambda_email_role.name
   policy_arn = aws_iam_policy.lambda_ses_policy.arn
 }
 
-# IAM Policy for Lambda - DynamoDB Access (if needed in future)
-resource "aws_iam_policy" "lambda_dynamodb_policy" {
-  name        = "ticketsync-lambda-dynamodb-policy"
-  description = "Allow Lambda to access DynamoDB tables"
+# DynamoDB access for Email Lambda (optional)
+resource "aws_iam_policy" "lambda_dynamodb_policy_email" {
+  name        = "ticketsync-lambda-dynamodb-policy-email"
+  description = "Email Lambda DynamoDB access"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:Query",
-          "dynamodb:Scan"
-        ]
+        Effect   = "Allow"
+        Action   = ["dynamodb:GetItem","dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:Query","dynamodb:Scan"]
         Resource = [
           aws_dynamodb_table.users.arn,
           aws_dynamodb_table.tickets.arn,
@@ -82,74 +74,130 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "lambda_dynamodb" {
+resource "aws_iam_role_policy_attachment" "lambda_dynamodb_attach_email" {
   role       = aws_iam_role.lambda_email_role.name
-  policy_arn = aws_iam_policy.lambda_dynamodb_policy.arn
+  policy_arn = aws_iam_policy.lambda_dynamodb_policy_email.arn
 }
 
-# Package Lambda function code
-data "archive_file" "lambda_zip" {
+# ----- Ticket Lambda Role -----
+resource "aws_iam_role" "lambda_ticket_role" {
+  name = "ticketsync-ticket-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = { Service = "lambda.amazonaws.com" }
+      }
+    ]
+  })
+
+  tags = { Name = "TicketSync Ticket Lambda Role", Environment = var.environment }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_logs_ticket" {
+  role       = aws_iam_role.lambda_ticket_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Ticket Lambda policy (DynamoDB + Comprehend)
+resource "aws_iam_policy" "lambda_ticket_policy" {
+  name        = "ticketsync-lambda-ticket-policy"
+  description = "Allow Lambda to access DynamoDB and Comprehend"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["dynamodb:GetItem","dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:Query","dynamodb:Scan"]
+        Resource = "*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["comprehend:DetectSentiment"]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ticket_lambda_policy_attach" {
+  role       = aws_iam_role.lambda_ticket_role.name
+  policy_arn = aws_iam_policy.lambda_ticket_policy.arn
+}
+
+# -----------------------------
+# 3️⃣ Package Lambda Code
+# -----------------------------
+
+# Email Lambda zip
+data "archive_file" "email_lambda_zip" {
   type        = "zip"
   source_file = "${path.module}/../lambda/email_handler.py"
   output_path = "${path.module}/../lambda/email_handler.zip"
 }
 
-# Lambda Function
+# Ticket Lambda zip
+data "archive_file" "ticket_lambda_zip" {
+  type        = "zip"
+  source_file = "${path.module}/../lambda/lambda_function.py"
+  output_path = "${path.module}/../lambda/lambda_function.zip"
+}
+
+# -----------------------------
+# 4️⃣ Lambda Functions
+# -----------------------------
+
+# Email Lambda
 resource "aws_lambda_function" "email_handler" {
-  filename         = data.archive_file.lambda_zip.output_path
+  filename         = data.archive_file.email_lambda_zip.output_path
   function_name    = "ticketsync-email-handler"
-  role            = aws_iam_role.lambda_email_role.arn
-  handler         = "email_handler.lambda_handler"
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-  runtime         = "python3.11"
-  timeout         = 30
+  role             = aws_iam_role.lambda_email_role.arn
+  handler          = "email_handler.lambda_handler"
+  source_code_hash = data.archive_file.email_lambda_zip.output_base64sha256
+  runtime          = "python3.11"
+  timeout          = 30
 
-  environment {
-    variables = {
-      SENDER_EMAIL = "csaputra@ucsd.edu"
-    }
-  }
+  environment { variables = { SENDER_EMAIL = "csaputra@ucsd.edu" } }
 
-  tags = {
-    Name        = "TicketSync Email Handler"
-    Environment = var.environment
-  }
+  tags = { Name = "TicketSync Email Handler", Environment = var.environment }
 }
 
-# CloudWatch Log Group for Lambda
-resource "aws_cloudwatch_log_group" "lambda_log_group" {
-  name              = "/aws/lambda/${aws_lambda_function.email_handler.function_name}"
-  retention_in_days = 7
+# Ticket Lambda
+resource "aws_lambda_function" "ticket_handler" {
+  filename         = data.archive_file.ticket_lambda_zip.output_path
+  function_name    = "ticketsync-ticket-handler"
+  role             = aws_iam_role.lambda_ticket_role.arn
+  handler          = "lambda_function.lambda_handler"
+  source_code_hash = data.archive_file.ticket_lambda_zip.output_base64sha256
+  runtime          = "python3.11"
+  timeout          = 30
 
-  tags = {
-    Name        = "TicketSync Email Lambda Logs"
-    Environment = var.environment
-  }
+  environment { variables = { DYNAMODB_TABLE = aws_dynamodb_table.tickets.name } }
+
+  tags = { Name = "TicketSync Ticket Handler", Environment = var.environment }
 }
 
-# API Gateway REST API
+# -----------------------------
+# 5️⃣ API Gateway for Email Lambda
+# -----------------------------
 resource "aws_api_gateway_rest_api" "email_api" {
   name        = "ticketsync-email-api"
   description = "API Gateway for TicketSync Email Service"
-
-  endpoint_configuration {
-    types = ["REGIONAL"]
-  }
-
-  tags = {
-    Name        = "TicketSync Email API"
-    Environment = var.environment
-  }
+  endpoint_configuration { types = ["REGIONAL"] }
+  tags = { Name = "TicketSync Email API", Environment = var.environment }
 }
 
-# API Gateway Resource
 resource "aws_api_gateway_resource" "email_resource" {
   rest_api_id = aws_api_gateway_rest_api.email_api.id
   parent_id   = aws_api_gateway_rest_api.email_api.root_resource_id
   path_part   = "send-email"
 }
 
-# API Gateway POST Method
+# POST and OPTIONS for Email Lambda
 resource "aws_api_gateway_method" "email_post" {
   rest_api_id   = aws_api_gateway_rest_api.email_api.id
   resource_id   = aws_api_gateway_resource.email_resource.id
@@ -157,7 +205,6 @@ resource "aws_api_gateway_method" "email_post" {
   authorization = "NONE"
 }
 
-# API Gateway OPTIONS Method (for CORS)
 resource "aws_api_gateway_method" "email_options" {
   rest_api_id   = aws_api_gateway_rest_api.email_api.id
   resource_id   = aws_api_gateway_resource.email_resource.id
@@ -165,7 +212,7 @@ resource "aws_api_gateway_method" "email_options" {
   authorization = "NONE"
 }
 
-# API Gateway Integration for POST
+# Integration for Email Lambda POST
 resource "aws_api_gateway_integration" "lambda_integration" {
   rest_api_id             = aws_api_gateway_rest_api.email_api.id
   resource_id             = aws_api_gateway_resource.email_resource.id
@@ -175,43 +222,33 @@ resource "aws_api_gateway_integration" "lambda_integration" {
   uri                     = aws_lambda_function.email_handler.invoke_arn
 }
 
-# API Gateway Integration for OPTIONS (CORS)
+# CORS integration
 resource "aws_api_gateway_integration" "options_integration" {
-  rest_api_id = aws_api_gateway_rest_api.email_api.id
-  resource_id = aws_api_gateway_resource.email_resource.id
-  http_method = aws_api_gateway_method.email_options.http_method
-  type        = "MOCK"
-
-  request_templates = {
-    "application/json" = "{\"statusCode\": 200}"
-  }
+  rest_api_id       = aws_api_gateway_rest_api.email_api.id
+  resource_id       = aws_api_gateway_resource.email_resource.id
+  http_method       = aws_api_gateway_method.email_options.http_method
+  type              = "MOCK"
+  request_templates = { "application/json" = "{\"statusCode\": 200}" }
 }
 
-# API Gateway Method Response for OPTIONS
 resource "aws_api_gateway_method_response" "options_response" {
-  rest_api_id = aws_api_gateway_rest_api.email_api.id
-  resource_id = aws_api_gateway_resource.email_resource.id
-  http_method = aws_api_gateway_method.email_options.http_method
-  status_code = "200"
-
+  rest_api_id   = aws_api_gateway_rest_api.email_api.id
+  resource_id   = aws_api_gateway_resource.email_resource.id
+  http_method   = aws_api_gateway_method.email_options.http_method
+  status_code   = "200"
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = true
     "method.response.header.Access-Control-Allow-Methods" = true
     "method.response.header.Access-Control-Allow-Origin"  = true
   }
-
-  response_models = {
-    "application/json" = "Empty"
-  }
+  response_models = { "application/json" = "Empty" }
 }
 
-# API Gateway Integration Response for OPTIONS
 resource "aws_api_gateway_integration_response" "options_integration_response" {
-  rest_api_id = aws_api_gateway_rest_api.email_api.id
-  resource_id = aws_api_gateway_resource.email_resource.id
-  http_method = aws_api_gateway_method.email_options.http_method
-  status_code = aws_api_gateway_method_response.options_response.status_code
-
+  rest_api_id   = aws_api_gateway_rest_api.email_api.id
+  resource_id   = aws_api_gateway_resource.email_resource.id
+  http_method   = aws_api_gateway_method.email_options.http_method
+  status_code   = aws_api_gateway_method_response.options_response.status_code
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
     "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
@@ -219,7 +256,7 @@ resource "aws_api_gateway_integration_response" "options_integration_response" {
   }
 }
 
-# Lambda Permission for API Gateway
+# Lambda permission for API Gateway
 resource "aws_lambda_permission" "api_gateway_permission" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
@@ -228,44 +265,147 @@ resource "aws_lambda_permission" "api_gateway_permission" {
   source_arn    = "${aws_api_gateway_rest_api.email_api.execution_arn}/*/*"
 }
 
-# API Gateway Deployment
+# Deployment and stage
 resource "aws_api_gateway_deployment" "email_api_deployment" {
   rest_api_id = aws_api_gateway_rest_api.email_api.id
-
-  depends_on = [
-    aws_api_gateway_integration.lambda_integration,
-    aws_api_gateway_integration.options_integration
-  ]
-
-  lifecycle {
-    create_before_destroy = true
-  }
+  depends_on  = [aws_api_gateway_integration.lambda_integration, aws_api_gateway_integration.options_integration]
+  lifecycle { create_before_destroy = true }
 }
 
-# API Gateway Stage
 resource "aws_api_gateway_stage" "email_api_stage" {
   deployment_id = aws_api_gateway_deployment.email_api_deployment.id
   rest_api_id   = aws_api_gateway_rest_api.email_api.id
   stage_name    = var.environment
+  tags          = { Name = "TicketSync Email API Stage", Environment = var.environment }
+}
 
-  tags = {
-    Name        = "TicketSync Email API ${var.environment} Stage"
-    Environment = var.environment
+# -----------------------------
+# 6️⃣ API Gateway for Ticket Lambda
+# -----------------------------
+# This will be the same structure as above, just for ticket_handler and /tickets
+resource "aws_api_gateway_rest_api" "ticket_api" {
+  name        = "ticketsync-ticket-api"
+  description = "API Gateway for TicketSync Ticket Service"
+  endpoint_configuration { types = ["REGIONAL"] }
+
+  tags = { Name = "TicketSync Ticket API", Environment = var.environment }
+}
+
+# Resource path: /tickets
+resource "aws_api_gateway_resource" "ticket_resource" {
+  rest_api_id = aws_api_gateway_rest_api.ticket_api.id
+  parent_id   = aws_api_gateway_rest_api.ticket_api.root_resource_id
+  path_part   = "tickets"
+}
+
+# POST method for creating tickets
+resource "aws_api_gateway_method" "ticket_post" {
+  rest_api_id   = aws_api_gateway_rest_api.ticket_api.id
+  resource_id   = aws_api_gateway_resource.ticket_resource.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
+# OPTIONS method for CORS preflight
+resource "aws_api_gateway_method" "ticket_options" {
+  rest_api_id   = aws_api_gateway_rest_api.ticket_api.id
+  resource_id   = aws_api_gateway_resource.ticket_resource.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+# Integration: POST → Lambda (AWS_PROXY)
+resource "aws_api_gateway_integration" "ticket_lambda_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.ticket_api.id
+  resource_id             = aws_api_gateway_resource.ticket_resource.id
+  http_method             = aws_api_gateway_method.ticket_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.ticket_handler.invoke_arn
+}
+
+# Integration: OPTIONS → MOCK (CORS preflight)
+resource "aws_api_gateway_integration" "ticket_options_integration" {
+  rest_api_id       = aws_api_gateway_rest_api.ticket_api.id
+  resource_id       = aws_api_gateway_resource.ticket_resource.id
+  http_method       = aws_api_gateway_method.ticket_options.http_method
+  type              = "MOCK"
+  request_templates = { "application/json" = "{\"statusCode\": 200}" }
+}
+
+# Method response for OPTIONS
+resource "aws_api_gateway_method_response" "ticket_options_response" {
+  rest_api_id   = aws_api_gateway_rest_api.ticket_api.id
+  resource_id   = aws_api_gateway_resource.ticket_resource.id
+  http_method   = aws_api_gateway_method.ticket_options.http_method
+  status_code   = "200"
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+  response_models = { "application/json" = "Empty" }
+}
+
+# Integration response for OPTIONS
+resource "aws_api_gateway_integration_response" "ticket_options_integration_response" {
+  rest_api_id   = aws_api_gateway_rest_api.ticket_api.id
+  resource_id   = aws_api_gateway_resource.ticket_resource.id
+  http_method   = aws_api_gateway_method.ticket_options.http_method
+  status_code   = aws_api_gateway_method_response.ticket_options_response.status_code
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
   }
 }
 
-# Outputs
-output "api_gateway_url" {
-  description = "API Gateway endpoint URL for sending emails"
-  value       = "${aws_api_gateway_stage.email_api_stage.invoke_url}/send-email"
+# Lambda permission for API Gateway
+resource "aws_lambda_permission" "ticket_api_permission" {
+  statement_id  = "AllowTicketAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.ticket_handler.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.ticket_api.execution_arn}/*/*"
 }
 
-output "lambda_function_name" {
-  description = "Name of the Lambda function"
-  value       = aws_lambda_function.email_handler.function_name
+# Deployment and Stage
+resource "aws_api_gateway_deployment" "ticket_api_deployment" {
+  rest_api_id = aws_api_gateway_rest_api.ticket_api.id
+  depends_on  = [
+    aws_api_gateway_integration.ticket_lambda_integration,
+    aws_api_gateway_integration.ticket_options_integration
+  ]
+  lifecycle { create_before_destroy = true }
 }
 
-output "lambda_function_arn" {
-  description = "ARN of the Lambda function"
-  value       = aws_lambda_function.email_handler.arn
+resource "aws_api_gateway_stage" "ticket_api_stage" {
+  deployment_id = aws_api_gateway_deployment.ticket_api_deployment.id
+  rest_api_id   = aws_api_gateway_rest_api.ticket_api.id
+  stage_name    = var.environment
+  tags          = { Name = "TicketSync Ticket API Stage", Environment = var.environment }
+}
+
+
+# -----------------------------
+# 7️⃣ Outputs
+# -----------------------------
+output "email_lambda_name" {
+  value = aws_lambda_function.email_handler.function_name
+}
+
+output "ticket_lambda_name" {
+  value = aws_lambda_function.ticket_handler.function_name
+}
+
+output "ticket_table_name" {
+  value = aws_dynamodb_table.tickets.name
+}
+
+output "email_api_url" {
+  value = "${aws_api_gateway_stage.email_api_stage.invoke_url}/send-email"
+}
+
+output "ticket_api_url" {
+  value = "${aws_api_gateway_stage.ticket_api_stage.invoke_url}/tickets"
 }
