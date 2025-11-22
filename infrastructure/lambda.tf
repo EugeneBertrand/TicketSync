@@ -176,7 +176,7 @@ resource "aws_lambda_function" "ticket_handler" {
   runtime          = "python3.11"
   timeout          = 30
 
-  environment { variables = { DYNAMODB_TABLE = aws_dynamodb_table.tickets.name } }
+  environment { variables = { DYNAMODB_TABLE = aws_dynamodb_table.tickets_test.name } }
 
   tags = { Name = "TicketSync Ticket Handler", Environment = var.environment }
 }

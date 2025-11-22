@@ -11,9 +11,9 @@ variable "aws_region" {
 }
 
 provider "aws" {
-  region = var.aws_region
+  region = "us-east-1"
+  profile = "terraform"
 }
-
 #---------------------------------------
 # SECTION 1: S3 BUCKET FOR REACT APP
 #---------------------------------------

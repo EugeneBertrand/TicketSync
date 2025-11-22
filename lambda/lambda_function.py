@@ -6,7 +6,12 @@ from datetime import datetime
 # initialize comprehend, dynamodb, and then the table that stores the results
 comprehend = boto3.client('comprehend')
 dynamodb = boto3.resource('dynamodb')
-table_name = os.environ.get('DYNAMODB_TABLE', 'SentimentAnalysisResults')
+# Use a test table
+table_name = os.environ.get('DYNAMODB_TABLE', 'tickets_test')
+# Use the test AWS profile
+#dynamodb = boto3.resource('dynamodb')
+#table = dynamodb.Table(table_name)
+#table_name = os.environ.get('DYNAMODB_TABLE', 'tickets')
 # get the table
 table = dynamodb.Table(table_name)
 
@@ -36,11 +41,18 @@ def lambda_handler(event, context):
         'priority': priority,
         'status': 'OPEN',
         'timestamp': datetime.utcnow().isoformat()
-    
+    #Python rules base system might be better than this version of sentiment analysis
+    # if a ticket is not resolved in X amount of time, it gets the highest priority
+    # and then it goes to the front of the queue
     })
     # Return the ticket ID and sentiment analysis result
     return {
         "statusCode": 200,
+        "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "OPTIONS,POST"
+        },
         "body": json.dumps({
             "message": "Ticket created",
             "ticket_id": ticket_id,
@@ -65,5 +77,10 @@ def update_ticket_status(event, context):
     return {
         # returns a success message
         "statusCode": 200,
+        "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "OPTIONS,POST"
+        },
         "body": json.dumps({"message": "Ticket updated"})
         }
