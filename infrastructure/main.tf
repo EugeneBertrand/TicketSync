@@ -278,6 +278,49 @@ resource "aws_iam_group_policy_attachment" "cognito_access" {
   policy_arn = aws_iam_policy.cognito_access.arn
 }
 
+# IAM Policy for Amazon Comprehend synchronous APIs
+resource "aws_iam_policy" "comprehend_access" {
+  name        = "TicketSync-Comprehend-Access"
+  description = "Allow developers to use Amazon Comprehend synchronous APIs in the configured region"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowComprehendSyncAPIs"
+        Effect = "Allow"
+        Action = [
+          "comprehend:BatchDetectDominantLanguage",
+          "comprehend:BatchDetectEntities",
+          "comprehend:BatchDetectKeyPhrases",
+          "comprehend:BatchDetectSentiment",
+          "comprehend:BatchDetectSyntax",
+          "comprehend:DetectDominantLanguage",
+          "comprehend:DetectEntities",
+          "comprehend:DetectKeyPhrases",
+          "comprehend:DetectSentiment",
+          "comprehend:DetectSyntax",
+          "comprehend:DetectPiiEntities",
+          "comprehend:ContainsPiiEntities",
+          "comprehend:ClassifyDocument"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Attach Comprehend policy to developer group
+resource "aws_iam_group_policy_attachment" "comprehend_access" {
+  group      = data.aws_iam_group.developer_group.group_name
+  policy_arn = aws_iam_policy.comprehend_access.arn
+}
+
 # Create IAM users for team members with console access
 resource "aws_iam_user" "team_members" {
   for_each = {
@@ -303,20 +346,8 @@ resource "aws_iam_user_login_profile" "team_logins" {
   
   user    = each.value.name
   
-  # Set the specific password for each user
-  password = {
-    "Dhruv" = "Dhruv111"
-    "Yuv" = "Yuvmagan22"
-    "Clarissa" = "Clarissa22"
-  }[each.key]
-  
   # Require password reset on first login
-  password_reset_required = false  # Set to true if you want to force password change on first login
-  
-  lifecycle {
-    # Prevent Terraform from trying to manage the password after creation
-    ignore_changes = [password]
-  }
+  password_reset_required = true  # Users will set their own password at first login
 }
 
 # Add team members to the developer group

@@ -58,11 +58,6 @@ resource "aws_dynamodb_table" "tickets" {
     name = "userId"
     type = "S"
   }
-  
-  attribute {
-    name = "description"
-    type = "S"
-  }
 
   global_secondary_index {
     name               = "StatusIndex"
