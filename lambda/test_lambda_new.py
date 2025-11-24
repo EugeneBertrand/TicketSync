@@ -70,9 +70,7 @@ def lambda_handler(event, context=None):
         })
     }
 
-# ---------------------------
-# Test locally
-# ---------------------------
+
 if __name__ == "__main__":
     test_event = {
         "body": json.dumps({

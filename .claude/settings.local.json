@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(terraform import:*)",
+      "Bash(aws dynamodb scan:*)",
+      "Bash(powershell -Command \"Compress-Archive -Path email_handler.py -DestinationPath email_handler.zip -Force\")",
+      "Bash(terraform apply:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

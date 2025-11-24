@@ -1,0 +1,69 @@
+{
+  "tickets_test": [
+    {
+      "PutRequest": {
+        "Item": {
+          "ticket_id": {"S": "TICKET-001"},
+          "timestamp": {"S": "2025-01-15T10:00:00"},
+          "status": {"S": "OPEN"},
+          "title": {"S": "Login page not loading"},
+          "description": {"S": "Users are unable to access the login page. Getting 404 errors when trying to navigate to /login."},
+          "sentiment": {"S": "NEGATIVE"},
+          "priority": {"S": "HIGH"}
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "ticket_id": {"S": "TICKET-002"},
+          "timestamp": {"S": "2025-01-16T14:30:00"},
+          "status": {"S": "OPEN"},
+          "title": {"S": "Dashboard shows incorrect data"},
+          "description": {"S": "Sales dashboard is displaying last month's data instead of current month. This is affecting our weekly reports."},
+          "sentiment": {"S": "NEGATIVE"},
+          "priority": {"S": "MEDIUM"}
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "ticket_id": {"S": "TICKET-003"},
+          "timestamp": {"S": "2025-01-17T09:15:00"},
+          "status": {"S": "OPEN"},
+          "title": {"S": "Email notifications not working"},
+          "description": {"S": "Users are not receiving email notifications for ticket updates. Very frustrating experience!"},
+          "sentiment": {"S": "NEGATIVE"},
+          "priority": {"S": "HIGH"}
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "ticket_id": {"S": "TICKET-004"},
+          "timestamp": {"S": "2025-01-18T11:45:00"},
+          "status": {"S": "OPEN"},
+          "title": {"S": "Search function slow"},
+          "description": {"S": "The search feature works but takes a long time to return results. Could be optimized."},
+          "sentiment": {"S": "NEUTRAL"},
+          "priority": {"S": "LOW"}
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "ticket_id": {"S": "TICKET-005"},
+          "timestamp": {"S": "2025-01-19T16:20:00"},
+          "status": {"S": "OPEN"},
+          "title": {"S": "Great new feature request"},
+          "description": {"S": "Love the app! Would be amazing if we could add file attachments to tickets."},
+          "sentiment": {"S": "POSITIVE"},
+          "priority": {"S": "MEDIUM"}
+        }
+      }
+    }
+  ]
+}

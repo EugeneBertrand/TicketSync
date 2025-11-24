@@ -66,6 +66,7 @@ resource "aws_iam_policy" "lambda_dynamodb_policy_email" {
         Resource = [
           aws_dynamodb_table.users.arn,
           aws_dynamodb_table.tickets.arn,
+          aws_dynamodb_table.tickets_test.arn,
           "${aws_dynamodb_table.users.arn}/index/*",
           "${aws_dynamodb_table.tickets.arn}/index/*"
         ]
@@ -388,7 +389,39 @@ resource "aws_api_gateway_stage" "ticket_api_stage" {
 
 
 # -----------------------------
-# 7️⃣ Outputs
+# 7️⃣ EventBridge Scheduler for Email Alerts
+# -----------------------------
+
+# EventBridge rule to trigger email Lambda every 7 days
+resource "aws_cloudwatch_event_rule" "email_scheduler" {
+  name                = "ticketsync-email-scheduler"
+  description         = "Triggers email alert Lambda every 7 days"
+  schedule_expression = "rate(7 days)"
+
+  tags = {
+    Name        = "TicketSync Email Scheduler"
+    Environment = var.environment
+  }
+}
+
+# Target: Email Lambda function
+resource "aws_cloudwatch_event_target" "email_lambda_target" {
+  rule      = aws_cloudwatch_event_rule.email_scheduler.name
+  target_id = "EmailLambdaTarget"
+  arn       = aws_lambda_function.email_handler.arn
+}
+
+# Permission for EventBridge to invoke the Lambda
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.email_handler.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.email_scheduler.arn
+}
+
+# -----------------------------
+# 8️⃣ Outputs
 # -----------------------------
 output "email_lambda_name" {
   value = aws_lambda_function.email_handler.function_name
@@ -408,4 +441,13 @@ output "email_api_url" {
 
 output "ticket_api_url" {
   value = "${aws_api_gateway_stage.ticket_api_stage.invoke_url}/tickets"
+}
+
+output "email_scheduler_status" {
+  description = "Email scheduler configuration"
+  value = {
+    name     = aws_cloudwatch_event_rule.email_scheduler.name
+    schedule = aws_cloudwatch_event_rule.email_scheduler.schedule_expression
+    enabled  = aws_cloudwatch_event_rule.email_scheduler.is_enabled
+  }
 }
