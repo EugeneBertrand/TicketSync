@@ -23,11 +23,7 @@ function App() {
           />
           <Route
             path="/admin/*"
-            element={
-              <ProtectedRoute userType="admin">
-                <AdminDashboard />
-              </ProtectedRoute>
-            }
+            element={<AdminDashboard />}
           />
           {/* Temporary routes for development to view dashboards without auth */}
           <Route path="/preview/client" element={<ClientDashboard />} />
